@@ -1,0 +1,258 @@
+---
+title: "Project2"
+author: "multiple"
+date: "8/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+```
+
+
+Your group is to type up a report for this project. One member of your group is to upload the
+report and the R script via Assignments on Collab. The report is to include the following:
+
+1. An executive summary that describes the high-level results of the analysis. This executive summary should be written in a way that can be understood by a wide variety
+of readers, including readers with no background in statistics. A way to think about
+this is how newspaper articles report results from various studies, so avoid technical
+jargon. This section should be no more than 2 pages.
+
+
+
+2. A detailed description for a professional audience. The audience for this section is
+another classmate your client may hire to review your report. This section should
+include:
+
+
+• Clear central analytic goals and/or questions to answer. The more practical,
+interest- ing, and challenging, the better.
+
+Question 1:
+We will be investigating what affects residual sugar, or general wine sweetness, we hypothesize that the most influential factors will be fixed acidity, alcohol content, and then ph. However we will investigating all possible factors
+- why sweetness
+- business perspective 
+
+Question 2: 
+Additionally, we will be trying to predict the quality of a wine based on the factors included in the dataset, and what is most influential based on the resulting estimates.
+
+
+• Detailed description of the data including challenges, data cleaning before, during,
+or after analysis
+
+```{r}
+library(tidyverse)
+white <- read.csv('wineQualityWhites.csv')
+red <- read.csv('wineQualityReds.csv')
+
+```
+
+```{r}
+head(white)
+```
+
+```{r}
+head(red)
+```
+
+
+### Merging Datasets
+
+```{r}
+red$type <- 'red'
+white$type <- 'white'
+all_wines <- bind_rows(red,white)
+head(all_wines)
+
+
+```
+
+### Grouping Quality
+```{r}
+print(table(all_wines$quality)) #datasets merged!
+
+```
+
+```{r}
+all_wines$qual_grouped = cut(all_wines$quality,breaks = c(0,6,10), labels = c('normal', 'excellent'))
+table(all_wines$qual_grouped)
+```
+Grouped the wines to make two categories to predict between 
+
+```{r}
+# remove_outliers<-function(df){
+#   #Remove outliers
+#   Q <- quantile(df$price, probs=c(.25, .75), na.rm = FALSE)
+#   iqr <- IQR(df$price)
+#   up <-  Q[2]+1.5*iqr # Upper Range  
+#   low<- Q[1]-1.5*iqr # Lower Range
+#   no_outliers<- subset(df, df$price > low & df$price < up)
+#   return (no_outliers)
+}
+
+
+```
+
+
+• Exploratory data analysis (data visualizations) and what you learned
+
+## Visualizations for Question 1
+```{r}
+ggplot(all_wines, (aes(x= residual.sugar, y = qual_grouped, fill = type )))+
+  geom_boxplot()+
+  xlim(0,35)
+
+```
+
+```{r}
+numeric <- all_wines %>% select(-c(X,quality, type, qual_grouped))
+
+cor(numeric)
+```
+
+- alcohol and density
+-free sulfure and total sulfur 
+-fixed acidity and desnity 
+-density and residual sugar
+-total sulfur and residual sugar
+-density and fixed acidity
+-Do VIF
+
+```{r}
+ggplot(all_wines, (aes(x = residual.sugar, color = type)))+
+  geom_boxplot() + xlim(0,30)
+
+```
+
+```{r}
+
+pairs(numeric,lower.panel=NULL, col = 3)
+```
+
+
+
+## Visualizations for Question 2
+
+### BoxPlots
+
+make grid
+```{r}
+ggplot(all_wines, (aes(x= alcohol, y = qual_grouped, fill = type)))+
+  geom_boxplot()
+
+
+```
+
+```{r}
+
+ggplot(all_wines, (aes(x= pH, y = qual_grouped )))+
+  geom_boxplot()
+
+```
+
+```{r}
+ggplot(all_wines, (aes(x= chlorides, y = qual_grouped )))+
+  geom_boxplot()
+
+```
+
+```{r}
+
+ggplot(all_wines, (aes(x= sulphates, y = qual_grouped )))+
+  geom_boxplot()
+
+```
+
+
+• Clear reasons given for model(s) considered
+
+### Multiple Regression for Sweetness
+
+starting with all predictors
+```{r}
+wine <- all_wines %>% select(-c(X, quality)) #taking out x as it is the index
+result_all<- lm(residual.sugar~., data = wine)
+summary(result_all)
+```
+
+
+
+## CHECK REGRESSION ASSUMPTIONS- can we do this for MLR
+```{r}
+vif(result_all)
+```
+No VIF values above 10
+
+```{r}
+wine2 <- all_wines %>% select(-c(X, total.sulfur.dioxide)) #taking out x as it is the index
+result_all2<- lm(residual.sugar~., data = wine2)
+summary(result_all2)
+
+```
+
+## CHECK REGRESSION ASSUMPTIONS- can we do this for MLR
+```{r}
+vif(result_all2)
+```
+
+```{r}
+yhat_all <- result_all$fitted.values
+res_all <- result_all$residuals
+
+ggplot(wine, aes(x=yhat_all,y=res_all))+
+geom_point()+
+geom_hline(yintercept=0) #+ xlim(0,50) + ylim(-15,10)
+```
+Violates first and second regression assumption
+
+
+Boxcox Transformation to fix constant variance issue
+```{r}
+boxcox(result_all, lambda=seq(0.3,0.8, 1/10)) 
+# 0.5 for ease of interpretation 
+nrow(wine) # big data set, therefore small confidence interval- maximized lambda value can take on sqrt transformation
+
+## ask group if want to transform
+```
+
+
+### Model for Quality
+```{r}
+set.seed(1999) ##for reproducibility to get the same split
+data = wine[complete.cases(wine),]
+sample<-sample.int(nrow(data), floor(.80*nrow(data)), replace = F)
+train<-data[sample, ] ##training data frame
+test<-data[-sample, ] ##test data frame
+
+model1 <- glm(qual_grouped~., family = "binomial", data=train)
+summary(model1)
+```
+
+```{r}
+model2 <- glm(qual_grouped~, family = "binomial", data=train)
+summary(model2)
+
+```
+
+
+```{r}
+train_wine_reduced <- train %>% select(-c(citric.acid))
+test_wine_reduced <- test %>% select(-c(citric.acid))
+model2_reduced <- glm(qual_grouped~., family = "binomial", data=train_wine_reduced)
+summary(model2_reduced)
+
+```
+• Appropriate model diagnostics provided and checked
+
+
+
+• Attempts to improve the model, as well as reasons for decisions made on how to
+improve the model.
+
+
+
+• Relevant R output and graphical summaries
+
+
+• Discussion of analysis should always be done contextually

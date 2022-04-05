@@ -1,0 +1,147 @@
+---
+title: "4630_milestone5_group28"
+author: "Angela Boakye Danquah"
+date: "11/23/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(MASS)
+library(Metrics)
+library(klaR)
+library(ICS)
+library(CompQuadForm)
+library(ROCR)
+library(tree)
+library(randomForest)
+library(gbm)
+```
+
+# Decision trees
+## Regression trees
+### Data cleaning
+```{r}
+set.seed(4630)
+whole$transmission<-as.factor(whole$transmission)
+whole$fuelType<-as.factor(whole$fuelType)
+whole<-whole[whole$transmission != "Other",]
+whole<-whole[whole$fuelType != "Other",]
+
+training<-sample_n(whole, round(0.5*nrow(whole)))
+training$transmission<-relevel(training$transmission,ref="Manual")
+training$fuelType<-relevel(training$fuelType,ref="Petrol")
+#test data
+test<-whole[-training$ID,]
+
+outliers<-c("13987","43236","48844","15527")
+training1<-training[!rownames(training) %in% outliers, ]
+```
+### building regression tree
+```{r}
+tree.reg.train<-tree(log(price)~year+transmission+mileage+fuelType+tax+mpg+engineSize, training1)
+summary(tree.reg.train)
+#create a graph for the regression tree
+plot(tree.reg.train)
+text(tree.reg.train, cex=0.75, pretty=0)  #add text to the graph
+#Number of terminal nodes:  11 
+```
+
+### pruned regression tree 
+```{r}
+set.seed(1)
+cv.reg<-cv.tree(tree.reg.train, K=10)
+#finding the size of the tree that leads to the smallest deviance with pruning
+####we can do this with 2 ways: 
+##1. plot of dev against size
+plot(cv.reg$size, cv.reg$dev,type='b')
+##2. size of tree chosen by pruning
+trees.num.reg<-cv.reg$size[which.min(cv.reg$dev)]
+trees.num.reg  #14
+prune.reg<-prune.tree(tree.reg.train, best=trees.num.reg)
+summary(prune.reg)
+plot(prune.reg)
+text(prune.reg, cex=0.75, pretty=0)  #add text to the graph
+```
+
+### test MSEs
+```{r}
+#test MSE for the recursive binary splitting tree & pruned tree
+tree.pred.test<-predict(tree.reg.train, newdata=test)
+mse(test$price, tree.pred.test) 
+```
+
+### Using random forest to improve the tree
+```{r}
+set.seed(2)
+ran.forest.reg<-randomForest(log(price)~year+transmission+mileage+fuelType+tax+mpg+engineSize, 
+                             data=training1, mtry=2, importance=TRUE)
+#mtry: p/3 = 7/3 = 2 for regression trees
+ran.forest.reg
+importance(ran.forest.reg)  #studyhrs has the biggest value, so study hours is the most important
+varImpPlot(ran.forest.reg)
+## test mse with random forest
+pred.ran.forest<-predict(ran.forest.reg, newdata=test)
+mse(test$price,pred.ran.forest)  
+```
+## Classification tree
+### data cleaning
+```{r}
+classdt<-whole[whole$make=="bmw"|whole$make=="ford",]
+classdt$make<-as.factor(classdt$make)
+#generate a random sample with only a half of size of the original data set
+set.seed(4630)
+sample.data<-sample.int(nrow(classdt), floor(.5*nrow(classdt)), replace = F)
+cltrain<-classdt[sample.data,]
+cltest<-classdt[-sample.data,]
+cltrain<-cltrain[!cltrain$year>2020,]
+```
+
+### classification tree with recursive binary splitting
+```{r}
+tree.class.train<-tree(make~year+price+mileage+tax+mpg+engineSize+transmission+fuelType, 
+                    data=cltrain)
+summary(tree.class.train)
+plot(tree.class.train)
+text(tree.class.train, cex=0.75, pretty=0)
+```
+
+### pruned classification tree
+```{r}
+set.seed(2)
+cv.class<-cv.tree(tree.class.train, K=10, FUN=prune.misclass)
+##plot of dev against size
+plot(cv.class$size, cv.class$dev,type='b')
+##size of tree chosen by pruning
+trees.num.class<-cv.class$size[which.min(cv.class$dev)]
+trees.num.class #9
+prune.class<-prune.misclass(tree.class.train, best=trees.num.class)
+prune.class
+plot(prune.class)
+text(prune.class, cex=0.75, pretty=0)
+```
+### confusion matrix of the classification tree 
+```{r}
+tree.pred.prune<-predict(prune.class, newdata=cltest, type="class")
+##confusion matrix
+table(cltest$make, tree.pred.prune)
+##overall accuracy
+mean(tree.pred.prune==cltest$make)
+```
+### using random forest to improve the classification tree 
+```{r}
+set.seed(2222)
+random.forest.class<-randomForest(make~year+price+mileage+tax+mpg+engineSize+transmission+fuelType, 
+                       data=cltrain, mtry=2,importance=TRUE) 
+#mtry: sqrt(7)= sqrt(7)=2 for classification trees
+importance(random.forest.class)
+varImpPlot(random.forest.class)
+##predicted class for test data
+pred.rf<-predict(random.forest.class, newdata=cltest,type="prob")
+##confusion matrix for test data
+table(cltest$make, pred.rf)
+##accuracy
+mean(pred.rf==cltest$make)
+```
